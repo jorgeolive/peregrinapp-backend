@@ -2,9 +2,13 @@ require('dotenv').config();
 const express = require('express');
 const { getHostelById } = require('./hostelService');
 const { getStageById } = require('./stageService');
+const { addUser, getUserByPhoneNumber, verifyUserPassword } = require('./userService');
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Middleware for parsing JSON bodies
+app.use(express.json());
 
 // Serve static files from the 'public' directory under the '/peregrinapp' path
 app.use('/peregrinapp', express.static('public'));
@@ -35,6 +39,71 @@ app.get('/peregrinapp/stages/:id', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.post('/peregrinapp/users', async (req, res) => {
+  const { phoneNumber, nickname, dateOfBirth, bio, isActivated, password } = req.body;
+  
+  if (!phoneNumber || !nickname) {
+    return res.status(400).json({ error: 'Phone number and nickname are required' });
+  }
+  
+  try {
+    const existingUser = await getUserByPhoneNumber(phoneNumber);
+    if (existingUser) {
+      return res.status(409).json({ error: 'User with this phone number already exists' });
+    }
+    
+    const user = await addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated || false, password);
+    res.status(201).json(user);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.get('/peregrinapp/users/:phoneNumber', async (req, res) => {
+  const { phoneNumber } = req.params;
+  try {
+    const user = await getUserByPhoneNumber(phoneNumber);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Don't send the password hash back to the client
+    delete user.password_hash;
+    
+    res.json(user);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.post('/peregrinapp/login', async (req, res) => {
+  const { phoneNumber, password } = req.body;
+  
+  if (!phoneNumber || !password) {
+    return res.status(400).json({ error: 'Phone number and password are required' });
+  }
+  
+  try {
+    const isValid = await verifyUserPassword(phoneNumber, password);
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    const user = await getUserByPhoneNumber(phoneNumber);
+    delete user.password_hash;
+    
+    res.json({ 
+      message: 'Login successful',
+      user
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
