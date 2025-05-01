@@ -11,7 +11,9 @@ function generateToken(user) {
     id: user.id,
     phone: user.phone_number,
     nickname: user.nickname,
-    isActivated: user.is_activated
+    isActivated: user.is_activated,
+    sharePosition: user.share_position,
+    enableDms: user.enable_dms
   };
 
   // Sign the token with our secret and set expiry

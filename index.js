@@ -7,7 +7,8 @@ const {
   getUserByPhoneNumber, 
   verifyUserPassword, 
   activateUser,
-  resendActivationCode
+  resendActivationCode,
+  updateUserPreferences
 } = require('./userService');
 const { generateToken, authenticateJWT, requireActivated } = require('./authService');
 
@@ -186,6 +187,47 @@ app.get('/peregrinapp/protected-resource', authenticateJWT, requireActivated, (r
     message: 'You have access to this protected resource',
     user: req.user
   });
+});
+
+// Endpoint to update user preferences (requires authentication)
+app.put('/peregrinapp/users/preferences', authenticateJWT, async (req, res) => {
+  const { sharePosition, enableDms } = req.body;
+  const phoneNumber = req.user.phone;
+  
+  // Make sure at least one preference is provided
+  if (sharePosition === undefined && enableDms === undefined) {
+    return res.status(400).json({ error: 'At least one preference must be provided' });
+  }
+  
+  try {
+    // Get current user to access current preference values
+    const currentUser = await getUserByPhoneNumber(phoneNumber);
+    if (!currentUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Use provided values or fall back to current values
+    const updatedSharePosition = sharePosition !== undefined ? sharePosition : currentUser.share_position;
+    const updatedEnableDms = enableDms !== undefined ? enableDms : currentUser.enable_dms;
+    
+    // Update the preferences
+    const updatedUser = await updateUserPreferences(
+      phoneNumber, 
+      updatedSharePosition,
+      updatedEnableDms
+    );
+    
+    // Don't return the password hash
+    delete updatedUser.password_hash;
+    
+    res.json({
+      message: 'Preferences updated successfully',
+      user: updatedUser
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
 });
 
 app.listen(port, () => {
