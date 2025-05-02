@@ -1,5 +1,7 @@
 require('dotenv').config();
 const express = require('express');
+const swaggerJsdoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
 const { getHostelById } = require('./hostelService');
 const { getStageById } = require('./stageService');
 const { 
@@ -14,6 +16,37 @@ const { generateToken, authenticateJWT, requireActivated } = require('./authServ
 
 const app = express();
 const port = process.env.PORT || 3000;
+
+// Swagger definition
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Peregrin App API',
+      version: '1.0.0',
+      description: 'API documentation for Peregrin App backend services',
+    },
+    servers: [
+      {
+        url: `http://localhost:${port}`,
+        description: 'Development server',
+      },
+    ],
+    components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+        },
+      },
+    },
+  },
+  apis: ['./*.js'], // Path to the API docs
+};
+
+const swaggerDocs = swaggerJsdoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
 app.use(express.json());
 
@@ -88,6 +121,57 @@ app.get('/peregrinapp/users/:phoneNumber', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /peregrinapp/login:
+ *   post:
+ *     summary: User login
+ *     description: Authenticates a user and returns a JWT token
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *               - password
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *                 description: The user's phone number
+ *               password:
+ *                 type: string
+ *                 description: The user's password
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Login successful
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                     phone_number:
+ *                       type: string
+ *                     nickname:
+ *                       type: string
+ *                 token:
+ *                   type: string
+ *                   description: JWT token for authentication
+ *       401:
+ *         description: Invalid credentials
+ *       500:
+ *         description: Server error
+ */
 app.post('/peregrinapp/login', async (req, res) => {
   const { phoneNumber, password } = req.body;
   
@@ -188,7 +272,42 @@ app.get('/peregrinapp/protected-resource', authenticateJWT, requireActivated, (r
   });
 });
 
-// Endpoint to update user preferences (requires authentication)
+/**
+ * @swagger
+ * /peregrinapp/users/preferences:
+ *   put:
+ *     summary: Update user preferences
+ *     description: Updates the user's preferences (requires authentication)
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               sharePosition:
+ *                 type: boolean
+ *                 description: Whether to share the user's position
+ *               enableDms:
+ *                 type: boolean
+ *                 description: Whether to enable direct messages
+ *     responses:
+ *       200:
+ *         description: Preferences updated successfully
+ *       400:
+ *         description: At least one preference must be provided
+ *       401:
+ *         description: Authorization token required
+ *       403:
+ *         description: Invalid or expired token
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Server error
+ */
 app.put('/peregrinapp/users/preferences', authenticateJWT, async (req, res) => {
   const { sharePosition, enableDms } = req.body;
   const phoneNumber = req.user.phone;
