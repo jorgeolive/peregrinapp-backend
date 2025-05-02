@@ -15,7 +15,6 @@ const { generateToken, authenticateJWT, requireActivated } = require('./authServ
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Middleware for parsing JSON bodies
 app.use(express.json());
 
 // Serve static files from the 'public' directory under the '/peregrinapp' path
