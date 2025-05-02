@@ -14,7 +14,7 @@ async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, pas
       password_hash, share_position, enable_dms, created_at
     )
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-     RETURNING id, phone_number, nickname, date_of_birth, bio, is_activated, 
+     RETURNING phone_number, nickname, date_of_birth, bio, is_activated, 
                share_position, enable_dms, created_at`,
     [phoneNumber, nickname, dateOfBirth, bio, isActivated, passwordHash, sharePosition, enableDms]
   );
@@ -24,22 +24,59 @@ async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, pas
     await generateActivationCode(phoneNumber);
   }
   
-  return result.rows[0];
+  const user = result.rows[0];
+  
+  // Transform snake_case to camelCase 
+  return {
+    phoneNumber: user.phone_number,
+    nickname: user.nickname,
+    dateOfBirth: user.date_of_birth,
+    bio: user.bio,
+    isActivated: user.is_activated,
+    sharePosition: user.share_position,
+    enableDms: user.enable_dms,
+    createdAt: user.created_at
+  };
 }
 
 async function getUserByPhoneNumber(phoneNumber) {
   const result = await pool.query(
-    `SELECT id, phone_number, nickname, date_of_birth, bio, is_activated, 
+    `SELECT phone_number, nickname, date_of_birth, bio, is_activated, 
             password_hash, share_position, enable_dms, created_at
      FROM peregrinapp.users
      WHERE phone_number = $1`,
     [phoneNumber]
   );
-  return result.rows[0];
+  
+  if (result.rows.length === 0) {
+    return null;
+  }
+  
+  const user = result.rows[0];
+  
+  // Transform snake_case to camelCase and remove password_hash
+  return {
+    phoneNumber: user.phone_number,
+    nickname: user.nickname,
+    dateOfBirth: user.date_of_birth,
+    bio: user.bio,
+    isActivated: user.is_activated,
+    sharePosition: user.share_position,
+    enableDms: user.enable_dms,
+    createdAt: user.created_at,
+    password_hash: user.password_hash // Keep this for internal use but it gets removed by most endpoints
+  };
 }
 
 async function verifyUserPassword(phoneNumber, password) {
-  const user = await getUserByPhoneNumber(phoneNumber);
+  const result = await pool.query(
+    `SELECT password_hash
+     FROM peregrinapp.users
+     WHERE phone_number = $1`,
+    [phoneNumber]
+  );
+  
+  const user = result.rows[0];
   if (!user || !user.password_hash) return false;
   
   return bcrypt.compare(password, user.password_hash);
@@ -136,17 +173,34 @@ async function resendActivationCode(phoneNumber) {
   return { success: true, message: 'Activation code sent' };
 }
 
-// Update user preferences
-async function updateUserPreferences(phoneNumber, sharePosition, enableDms) {
+// Update user preferences and profile information
+async function updateUserPreferences(phoneNumber, sharePosition, enableDms, bio) {
   const result = await pool.query(
     `UPDATE peregrinapp.users
-     SET share_position = $2, enable_dms = $3
+     SET share_position = $2, enable_dms = $3, bio = $4
      WHERE phone_number = $1
-     RETURNING id, phone_number, nickname, date_of_birth, bio, is_activated, 
+     RETURNING phone_number, nickname, date_of_birth, bio, is_activated, 
                share_position, enable_dms, created_at`,
-    [phoneNumber, sharePosition, enableDms]
+    [phoneNumber, sharePosition, enableDms, bio]
   );
-  return result.rows[0];
+  
+  if (result.rows.length === 0) {
+    return null;
+  }
+  
+  const user = result.rows[0];
+  
+  // Transform snake_case to camelCase like in getUserByPhoneNumber
+  return {
+    phoneNumber: user.phone_number,
+    nickname: user.nickname,
+    dateOfBirth: user.date_of_birth,
+    bio: user.bio,
+    isActivated: user.is_activated,
+    sharePosition: user.share_position,
+    enableDms: user.enable_dms,
+    createdAt: user.created_at
+  };
 }
 
 module.exports = { 

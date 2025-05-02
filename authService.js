@@ -5,12 +5,11 @@ const TOKEN_EXPIRY = '100d';
 
 function generateToken(user) {
   const payload = {
-    id: user.id,
-    phone: user.phone_number,
+    phone: user.phoneNumber,
     nickname: user.nickname,
-    isActivated: user.is_activated,
-    sharePosition: user.share_position,
-    enableDms: user.enable_dms
+    isActivated: user.isActivated,
+    sharePosition: user.sharePosition,
+    enableDms: user.enableDms
   };
 
   return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });

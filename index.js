@@ -53,7 +53,33 @@ app.use(express.json());
 // Serve static files from the 'public' directory under the '/peregrinapp' path
 app.use('/peregrinapp', express.static('public'));
 
-app.get('/peregrinapp/hostels/:id', async (req, res) => {
+/**
+ * @swagger
+ * /peregrinapp/hostels/{id}:
+ *   get:
+ *     summary: Get hostel by ID
+ *     description: Retrieves details for a specific hostel (requires authentication)
+ *     tags: [Hostels]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The hostel ID
+ *     responses:
+ *       200:
+ *         description: Hostel details
+ *       401:
+ *         description: Unauthorized - authentication required
+ *       404:
+ *         description: Hostel not found
+ *       500:
+ *         description: Server error
+ */
+app.get('/peregrinapp/hostels/:id', authenticateJWT, async (req, res) => {
   const { id } = req.params;
   try {
     const hostel = await getHostelById(id);
@@ -67,8 +93,33 @@ app.get('/peregrinapp/hostels/:id', async (req, res) => {
   }
 });
 
-// Endpoint to get stage by id
-app.get('/peregrinapp/stages/:id', async (req, res) => {
+/**
+ * @swagger
+ * /peregrinapp/stages/{id}:
+ *   get:
+ *     summary: Get stage by ID
+ *     description: Retrieves details for a specific stage (requires authentication)
+ *     tags: [Stages]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The stage ID
+ *     responses:
+ *       200:
+ *         description: Stage details
+ *       401:
+ *         description: Unauthorized - authentication required
+ *       404:
+ *         description: Stage not found
+ *       500:
+ *         description: Server error
+ */
+app.get('/peregrinapp/stages/:id', authenticateJWT, async (req, res) => {
   const { id } = req.params;
   try {
     const stage = await getStageById(id);
@@ -82,6 +133,50 @@ app.get('/peregrinapp/stages/:id', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /peregrinapp/users:
+ *   post:
+ *     summary: Register a new user
+ *     description: Creates a new user account (no authentication required)
+ *     tags: [Users]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *               - nickname
+ *               - password
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *                 description: The user's phone number (used as identifier)
+ *               nickname:
+ *                 type: string
+ *                 description: The user's display name
+ *               password:
+ *                 type: string
+ *                 description: User's password
+ *               dateOfBirth:
+ *                 type: string
+ *                 format: date
+ *                 description: User's date of birth
+ *               bio:
+ *                 type: string
+ *                 description: User's biography or description
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ *       400:
+ *         description: Missing required fields
+ *       409:
+ *         description: User with this phone number already exists
+ *       500:
+ *         description: Server error
+ */
 app.post('/peregrinapp/users', async (req, res) => {
   const { phoneNumber, nickname, dateOfBirth, bio, isActivated, password } = req.body;
   
@@ -103,16 +198,39 @@ app.post('/peregrinapp/users', async (req, res) => {
   }
 });
 
-app.get('/peregrinapp/users/:phoneNumber', async (req, res) => {
+/**
+ * @swagger
+ * /peregrinapp/users/{phoneNumber}:
+ *   get:
+ *     summary: Get user by phone number
+ *     description: Retrieves user details by phone number (requires authentication)
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: phoneNumber
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The user's phone number
+ *     responses:
+ *       200:
+ *         description: User details
+ *       401:
+ *         description: Unauthorized - authentication required
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Server error
+ */
+app.get('/peregrinapp/users/:phoneNumber', authenticateJWT, async (req, res) => {
   const { phoneNumber } = req.params;
   try {
     const user = await getUserByPhoneNumber(phoneNumber);
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
-    // Don't send the password hash back to the client
-    delete user.password_hash;
     
     res.json(user);
   } catch (err) {
@@ -158,12 +276,20 @@ app.get('/peregrinapp/users/:phoneNumber', async (req, res) => {
  *                 user:
  *                   type: object
  *                   properties:
- *                     id:
- *                       type: integer
- *                     phone_number:
+ *                     phoneNumber:
  *                       type: string
+ *                       description: User's phone number (primary identifier)
  *                     nickname:
  *                       type: string
+ *                     dateOfBirth:
+ *                       type: string
+ *                       format: date
+ *                     isActivated:
+ *                       type: boolean
+ *                     sharePosition:
+ *                       type: boolean
+ *                     enableDms:
+ *                       type: boolean
  *                 token:
  *                   type: string
  *                   description: JWT token for authentication
@@ -186,11 +312,10 @@ app.post('/peregrinapp/login', async (req, res) => {
     }
     
     const user = await getUserByPhoneNumber(phoneNumber);
-    delete user.password_hash;
     
     // Generate JWT token
     const token = generateToken(user);
-    
+    console.log(user);
     res.json({ 
       message: 'Login successful',
       user,
@@ -202,7 +327,37 @@ app.post('/peregrinapp/login', async (req, res) => {
   }
 });
 
-// Endpoint to activate user with verification code
+/**
+ * @swagger
+ * /peregrinapp/users/activate:
+ *   post:
+ *     summary: Activate user account
+ *     description: Activates a user account with the provided activation code (no authentication required)
+ *     tags: [Users]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *               - activationCode
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *                 description: The user's phone number
+ *               activationCode:
+ *                 type: string
+ *                 description: The activation code sent to the user
+ *     responses:
+ *       200:
+ *         description: User activated successfully
+ *       400:
+ *         description: Invalid or expired activation code
+ *       500:
+ *         description: Server error
+ */
 app.post('/peregrinapp/users/activate', async (req, res) => {
   const { phoneNumber, activationCode } = req.body;
   
@@ -224,7 +379,33 @@ app.post('/peregrinapp/users/activate', async (req, res) => {
   }
 });
 
-// Endpoint to resend activation code
+/**
+ * @swagger
+ * /peregrinapp/users/resend-code:
+ *   post:
+ *     summary: Resend activation code
+ *     description: Sends a new activation code to the user (no authentication required)
+ *     tags: [Users]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phoneNumber
+ *             properties:
+ *               phoneNumber:
+ *                 type: string
+ *                 description: The user's phone number
+ *     responses:
+ *       200:
+ *         description: Activation code sent successfully
+ *       400:
+ *         description: User not found or already activated
+ *       500:
+ *         description: Server error
+ */
 app.post('/peregrinapp/users/resend-code', async (req, res) => {
   const { phoneNumber } = req.body;
   
@@ -256,7 +437,6 @@ app.get('/peregrinapp/profile', authenticateJWT, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
-    delete user.password_hash;
     res.json(user);
   } catch (err) {
     console.error(err);
@@ -274,10 +454,10 @@ app.get('/peregrinapp/protected-resource', authenticateJWT, requireActivated, (r
 
 /**
  * @swagger
- * /peregrinapp/users/preferences:
+ * /peregrinapp/users/profile:
  *   put:
- *     summary: Update user preferences
- *     description: Updates the user's preferences (requires authentication)
+ *     summary: Update user profile
+ *     description: Updates the user's profile information and preferences (requires authentication)
  *     tags: [Users]
  *     security:
  *       - bearerAuth: []
@@ -294,11 +474,14 @@ app.get('/peregrinapp/protected-resource', authenticateJWT, requireActivated, (r
  *               enableDms:
  *                 type: boolean
  *                 description: Whether to enable direct messages
+ *               bio:
+ *                 type: string
+ *                 description: User's biography or personal description
  *     responses:
  *       200:
- *         description: Preferences updated successfully
+ *         description: Profile updated successfully
  *       400:
- *         description: At least one preference must be provided
+ *         description: At least one property must be provided
  *       401:
  *         description: Authorization token required
  *       403:
@@ -308,38 +491,37 @@ app.get('/peregrinapp/protected-resource', authenticateJWT, requireActivated, (r
  *       500:
  *         description: Server error
  */
-app.put('/peregrinapp/users/preferences', authenticateJWT, async (req, res) => {
-  const { sharePosition, enableDms } = req.body;
+app.put('/peregrinapp/users/profile', authenticateJWT, async (req, res) => {
+  const { sharePosition, enableDms, bio } = req.body;
   const phoneNumber = req.user.phone;
   
-  // Make sure at least one preference is provided
-  if (sharePosition === undefined && enableDms === undefined) {
-    return res.status(400).json({ error: 'At least one preference must be provided' });
+  // Make sure at least one property is provided
+  if (sharePosition === undefined && enableDms === undefined && bio === undefined) {
+    return res.status(400).json({ error: 'At least one property must be provided' });
   }
   
   try {
-    // Get current user to access current preference values
+    // Get current user to access current values
     const currentUser = await getUserByPhoneNumber(phoneNumber);
     if (!currentUser) {
       return res.status(404).json({ error: 'User not found' });
     }
     
     // Use provided values or fall back to current values
-    const updatedSharePosition = sharePosition !== undefined ? sharePosition : currentUser.share_position;
-    const updatedEnableDms = enableDms !== undefined ? enableDms : currentUser.enable_dms;
+    const updatedSharePosition = sharePosition !== undefined ? sharePosition : currentUser.sharePosition;
+    const updatedEnableDms = enableDms !== undefined ? enableDms : currentUser.enableDms;
+    const updatedBio = bio !== undefined ? bio : currentUser.bio;
     
-    // Update the preferences
+    // Update the user profile
     const updatedUser = await updateUserPreferences(
       phoneNumber, 
       updatedSharePosition,
-      updatedEnableDms
+      updatedEnableDms,
+      updatedBio
     );
     
-    // Don't return the password hash
-    delete updatedUser.password_hash;
-    
     res.json({
-      message: 'Preferences updated successfully',
+      message: 'Profile updated successfully',
       user: updatedUser
     });
   } catch (err) {
