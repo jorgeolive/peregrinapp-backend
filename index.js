@@ -37,10 +37,12 @@ const initServices = async () => {
     // Initialize Redis first with explicit config from environment
     console.log('⏳ Initializing Redis service...');
     const redisConfig = {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
+      socket: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10)
+      },
       password: process.env.REDIS_PASSWORD || undefined,
-      db: parseInt(process.env.REDIS_DB || '0', 10)
+      database: parseInt(process.env.REDIS_DB || '0', 10)
     };
     console.log(`📌 Using Redis config: ${JSON.stringify({...redisConfig, password: redisConfig.password ? '***' : undefined})}`);
     
