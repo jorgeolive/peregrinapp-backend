@@ -4,19 +4,19 @@ const pool = new Pool();
 
 const SALT_ROUNDS = 10;
 
-async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, password, sharePosition = false, enableDms = false) {
+async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, password, enableDms = false) {
   // Hash the password
   const passwordHash = password ? await bcrypt.hash(password, SALT_ROUNDS) : null;
   
   const result = await pool.query(
     `INSERT INTO peregrinapp.users (
       phone_number, nickname, date_of_birth, bio, is_activated, 
-      password_hash, share_position, enable_dms, created_at
+      password_hash, enable_dms, created_at
     )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
      RETURNING phone_number, nickname, date_of_birth, bio, is_activated, 
-               share_position, enable_dms, created_at`,
-    [phoneNumber, nickname, dateOfBirth, bio, isActivated, passwordHash, sharePosition, enableDms]
+               enable_dms, created_at`,
+    [phoneNumber, nickname, dateOfBirth, bio, isActivated, passwordHash, enableDms]
   );
   
   // Generate activation code if user is not already activated
@@ -33,7 +33,6 @@ async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, pas
     dateOfBirth: user.date_of_birth,
     bio: user.bio,
     isActivated: user.is_activated,
-    sharePosition: user.share_position,
     enableDms: user.enable_dms,
     createdAt: user.created_at
   };
@@ -42,7 +41,7 @@ async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, pas
 async function getUserByPhoneNumber(phoneNumber) {
   const result = await pool.query(
     `SELECT phone_number, nickname, date_of_birth, bio, is_activated, 
-            password_hash, share_position, enable_dms, created_at
+            password_hash, enable_dms, created_at
      FROM peregrinapp.users
      WHERE phone_number = $1`,
     [phoneNumber]
@@ -61,7 +60,6 @@ async function getUserByPhoneNumber(phoneNumber) {
     dateOfBirth: user.date_of_birth,
     bio: user.bio,
     isActivated: user.is_activated,
-    sharePosition: user.share_position,
     enableDms: user.enable_dms,
     createdAt: user.created_at,
     password_hash: user.password_hash // Keep this for internal use but it gets removed by most endpoints
@@ -174,14 +172,14 @@ async function resendActivationCode(phoneNumber) {
 }
 
 // Update user preferences and profile information
-async function updateUserPreferences(phoneNumber, sharePosition, enableDms, bio) {
+async function updateUserPreferences(phoneNumber, enableDms, bio) {
   const result = await pool.query(
     `UPDATE peregrinapp.users
-     SET share_position = $2, enable_dms = $3, bio = $4
+     SET enable_dms = $2, bio = $3
      WHERE phone_number = $1
      RETURNING phone_number, nickname, date_of_birth, bio, is_activated, 
-               share_position, enable_dms, created_at`,
-    [phoneNumber, sharePosition, enableDms, bio]
+               enable_dms, created_at`,
+    [phoneNumber, enableDms, bio]
   );
   
   if (result.rows.length === 0) {
@@ -197,7 +195,6 @@ async function updateUserPreferences(phoneNumber, sharePosition, enableDms, bio)
     dateOfBirth: user.date_of_birth,
     bio: user.bio,
     isActivated: user.is_activated,
-    sharePosition: user.share_position,
     enableDms: user.enable_dms,
     createdAt: user.created_at
   };
