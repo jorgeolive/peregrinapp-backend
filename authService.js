@@ -5,7 +5,7 @@ const TOKEN_EXPIRY = '100d';
 
 function generateToken(user) {
   const payload = {
-    phone: user.phoneNumber
+    userId: user.id
   };
 
   return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
@@ -33,7 +33,7 @@ const verifyToken = (token) => {
     const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET || 'your_jwt_secret');
     
     // Check if token payload has minimum required fields
-    if (!decoded || !decoded.phone) {
+    if (!decoded || !decoded.userId) {
       return {
         valid: false,
         error: 'Invalid token payload'
@@ -84,9 +84,9 @@ function authenticateJWT(req, res, next) {
 // Check if user is activated middleware
 async function requireActivated(req, res, next) {
   try {
-    // Get the user from the database since token only has phone number
-    const { getUserByPhoneNumber } = require('./userService');
-    const user = await getUserByPhoneNumber(req.user.phone);
+    // Get the user from the database since token only has userId
+    const { getUserById } = require('./userService');
+    const user = await getUserById(req.user.userId);
     
     if (!user || !user.isActivated) {
       return res.status(403).json({ error: 'Account not activated' });

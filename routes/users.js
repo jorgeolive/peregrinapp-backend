@@ -6,7 +6,8 @@ const {
   verifyUserPassword, 
   activateUser,
   resendActivationCode,
-  updateUserPreferences
+  updateUserPreferences,
+  getUserById
 } = require('../userService');
 const { authenticateJWT, requireActivated, generateToken } = require('../authService');
 const { getActiveUsers } = require('../sockets/socketManager');
@@ -131,12 +132,12 @@ router.get('/:phoneNumber', authenticateJWT, async (req, res) => {
  *           schema:
  *             type: object
  *             required:
- *               - phoneNumber
+ *               - userId
  *               - activationCode
  *             properties:
- *               phoneNumber:
- *                 type: string
- *                 description: The user's phone number
+ *               userId:
+ *                 type: integer
+ *                 description: The user's ID
  *               activationCode:
  *                 type: string
  *                 description: The activation code sent to the user
@@ -149,14 +150,14 @@ router.get('/:phoneNumber', authenticateJWT, async (req, res) => {
  *         description: Server error
  */
 router.post('/activate', async (req, res) => {
-  const { phoneNumber, activationCode } = req.body;
+  const { userId, activationCode } = req.body;
   
-  if (!phoneNumber || !activationCode) {
-    return res.status(400).json({ error: 'Phone number and activation code are required' });
+  if (!userId || !activationCode) {
+    return res.status(400).json({ error: 'User ID and activation code are required' });
   }
   
   try {
-    const result = await activateUser(phoneNumber, activationCode);
+    const result = await activateUser(userId, activationCode);
     
     if (result.success) {
       res.json({ message: result.message });
@@ -183,11 +184,11 @@ router.post('/activate', async (req, res) => {
  *           schema:
  *             type: object
  *             required:
- *               - phoneNumber
+ *               - userId
  *             properties:
- *               phoneNumber:
- *                 type: string
- *                 description: The user's phone number
+ *               userId:
+ *                 type: integer
+ *                 description: The user's ID
  *     responses:
  *       200:
  *         description: Activation code sent successfully
@@ -197,14 +198,14 @@ router.post('/activate', async (req, res) => {
  *         description: Server error
  */
 router.post('/resend-code', async (req, res) => {
-  const { phoneNumber } = req.body;
+  const { userId } = req.body;
   
-  if (!phoneNumber) {
-    return res.status(400).json({ error: 'Phone number is required' });
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID is required' });
   }
   
   try {
-    const result = await resendActivationCode(phoneNumber);
+    const result = await resendActivationCode(userId);
     
     if (result.success) {
       res.json({ message: result.message });
@@ -329,12 +330,12 @@ router.post('/login', async (req, res) => {
   }
   
   try {
-    const isValid = await verifyUserPassword(phoneNumber, password);
-    if (!isValid) {
+    const passwordCheck = await verifyUserPassword(phoneNumber, password);
+    if (!passwordCheck.valid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
-    const user = await getUserByPhoneNumber(phoneNumber);
+    const user = await getUserById(passwordCheck.userId);
     
     // Generate JWT token
     const token = generateToken(user);
@@ -354,7 +355,7 @@ router.post('/login', async (req, res) => {
 router.get('/profile', authenticateJWT, async (req, res) => {
   try {
     // req.user contains the decoded JWT payload added by the middleware
-    const user = await getUserByPhoneNumber(req.user.phone);
+    const user = await getUserById(req.user.userId);
     
     if (!user) {
       return res.status(404).json({ error: 'User not found' });

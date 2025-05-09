@@ -1,6 +1,6 @@
 const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
-const { getUserByPhoneNumber } = require('../userService');
+const { getUserById } = require('../userService');
 const { verifyToken } = require('../authService');
 const redisService = require('../services/redisService');
 
@@ -109,6 +109,8 @@ const setupSocketIO = (server) => {
   // Socket.IO authentication middleware
   io.use(async (socket, next) => {
     console.log(`⏳ New socket connection attempt, handshake ID: ${socket.id}`);
+    console.log(`🔍 Connection details - IP: ${socket.handshake.address}, Transport: ${socket.conn.transport.name}`);
+    
     const token = socket.handshake.auth.token;
     
     if (!token) {
@@ -117,9 +119,11 @@ const setupSocketIO = (server) => {
     }
     
     console.log(`🔑 Verifying token for socket: ${socket.id}`);
+    console.log(`🔐 Token received length: ${token.length} chars, starts with: ${token.substring(0, 10)}...`);
     
     try {
       // Verify JWT token using our enhanced verifyToken function
+      console.log(`⏳ Calling verifyToken function for socket ${socket.id}`);
       const tokenResult = verifyToken(token);
       
       if (!tokenResult.valid) {
@@ -128,32 +132,49 @@ const setupSocketIO = (server) => {
       }
       
       const decoded = tokenResult.decoded;
-      console.log(`✅ Token valid for phone: ${decoded.phone}`);
+      console.log(`✅ Token valid for user ID: ${decoded.userId}`);
+      console.log(`📋 Token payload: ${JSON.stringify({
+        userId: decoded.userId,
+        iat: decoded.iat,
+        exp: decoded.exp,
+        expiresIn: new Date(decoded.exp * 1000).toISOString()
+      })}`);
       
       // Fetch user details
       try {
-        console.log(`⏳ Fetching user details for phone: ${decoded.phone}`);
-        const user = await getUserByPhoneNumber(decoded.phone);
+        console.log(`⏳ Fetching user details for ID: ${decoded.userId}`);
+        const user = await getUserById(decoded.userId);
+        
         if (!user) {
-          console.error(`❌ User not found for phone: ${decoded.phone}`);
+          console.error(`❌ User not found for ID: ${decoded.userId}`);
           return next(new Error('Authentication error: User not found'));
         }
         
+        console.log(`✅ User found in database: ${user.nickname} (ID: ${user.id})`);
+        console.log(`📋 User data: ${JSON.stringify({
+          id: user.id,
+          phoneNumber: user.phoneNumber,
+          nickname: user.nickname,
+          isActivated: user.isActivated
+        })}`);
+        
         // Check if user is activated
         if (!user.isActivated) {
-          console.error(`❌ Account not activated for user: ${decoded.phone}`);
+          console.error(`❌ Account not activated for user ID: ${decoded.userId}`);
           return next(new Error('Authentication error: Account not activated'));
         }
         
         // Add user data to socket
-        socket.userId = user.phoneNumber;
+        socket.userId = user.id;
         socket.phoneNumber = user.phoneNumber;
         socket.username = user.nickname;
+        console.log(`🔗 User data attached to socket: userId=${socket.userId}, username=${socket.username}`);
         
-        console.log(`✅ Socket auth successful: ${user.nickname} (${user.phoneNumber}), socket ID: ${socket.id}`);
+        console.log(`✅ Socket auth successful: ${user.nickname} (ID: ${user.id}), socket ID: ${socket.id}`);
+        console.log(`⏱️ Auth process completed in ${Date.now() - socket.handshake.issued} ms`);
         next();
       } catch (dbError) {
-        console.error(`❌ Database error during socket authentication for phone ${decoded.phone}:`, dbError);
+        console.error(`❌ Database error during socket authentication for user ID ${decoded.userId}:`, dbError);
         return next(new Error('Authentication error: Database error'));
       }
     } catch (error) {
@@ -240,7 +261,7 @@ const setupSocketIO = (server) => {
 
   // Socket.IO connection handler
   io.on('connection', async (socket) => {
-    console.log(`🟢 User connected: ${socket.username} (${socket.phoneNumber}), socket ID: ${socket.id}`);
+    console.log(`🟢 User connected: ${socket.username} (ID: ${socket.userId}), socket ID: ${socket.id}`);
     
     // Store socket connection in memory map
     activeConnections.set(socket.userId, socket);
@@ -329,7 +350,7 @@ const setupSocketIO = (server) => {
     
     // Handle disconnection
     socket.on('disconnect', async (reason) => {
-      console.log(`🔴 User disconnected: ${socket.username} (${socket.phoneNumber}), socket ID: ${socket.id}, reason: ${reason}`);
+      console.log(`🔴 User disconnected: ${socket.username} (ID: ${socket.userId}), socket ID: ${socket.id}, reason: ${reason}`);
       
       // Remove from active connections
       activeConnections.delete(socket.userId);
@@ -341,13 +362,12 @@ const setupSocketIO = (server) => {
           console.log(`⏳ Removing position for ${socket.userId} due to disconnect`);
           await redisService.removeUserPosition(socket.userId);
           
-          // Update user details to show offline status
-          console.log(`⏳ Updating user details for ${socket.userId} to offline`);
+          // Update user details to record disconnection time only
+          console.log(`⏳ Updating user details for ${socket.userId} with disconnection time`);
           await redisService.storeUserDetails(socket.userId, {
-            online: 'false',
             disconnectionTime: Date.now()
           });
-          console.log(`✅ User ${socket.userId} marked as offline in Redis`);
+          console.log(`✅ User ${socket.userId} disconnect time recorded in Redis`);
         } catch (error) {
           console.error(`❌ Error handling disconnect cleanup for ${socket.userId}:`, error);
         }
@@ -411,4 +431,4 @@ module.exports = {
       return [];
     }
   }
-}; 
+};

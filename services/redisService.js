@@ -198,7 +198,7 @@ const storeUserPosition = async (userId, longitude, latitude) => {
     
     // Use GEOADD to store the position
     await redisCommands.geoadd(KEYS.USER_POSITIONS, [
-      { longitude, latitude, member: userId }
+      { longitude, latitude, member: `user:${userId}` }
     ]);
     
     // Also store individual position with expiry
@@ -256,7 +256,7 @@ const getUserPosition = async (userId) => {
     }
     
     // Fallback to geo position
-    const positions = await redisCommands.geopos(KEYS.USER_POSITIONS, [userId]);
+    const positions = await redisCommands.geopos(KEYS.USER_POSITIONS, [`user:${userId}`]);
     
     // If user doesn't exist or has no position, return null
     if (!positions || !positions[0]) {
@@ -368,7 +368,7 @@ const removeUserPosition = async (userId) => {
     }
     
     // Remove from geospatial index
-    await redisCommands.zrem(KEYS.USER_POSITIONS, userId);
+    await redisCommands.zrem(KEYS.USER_POSITIONS, `user:${userId}`);
     
     // Remove individual position key
     const positionKey = `${KEYS.USER_POSITION_KEY}${userId}`;
