@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const { getUserById } = require('../userService');
 const { verifyToken } = require('../authService');
 const redisService = require('../services/redisService');
+const chatService = require('../services/chatService');
 
 // In-memory cache for active socket connections by user ID
 const activeConnections = new Map();
@@ -258,6 +259,49 @@ const setupSocketIO = (server) => {
     }
   };
 
+  // Function to get users with DMs enabled
+  const getUsersWithDmsEnabled = async (userIds) => {
+    if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
+      return [];
+    }
+    
+    console.log(`⏳ Checking DM status for ${userIds.length} users`);
+    
+    try {
+      const { getUserById } = require('../userService');
+      
+      // Get DM status for each user
+      const userDmStatuses = await Promise.all(
+        userIds.map(async (userId) => {
+          try {
+            const user = await getUserById(userId);
+            if (!user) {
+              console.log(`⚠️ User ${userId} not found when checking DM status`);
+              return null;
+            }
+            
+            return {
+              userId: user.id,
+              enableDms: user.enableDms || false,
+              isOnline: activeConnections.has(user.id)
+            };
+          } catch (error) {
+            console.error(`❌ Error checking DM status for user ${userId}:`, error);
+            return null;
+          }
+        })
+      );
+      
+      // Filter out null values and return
+      const validStatuses = userDmStatuses.filter(status => status !== null);
+      console.log(`✅ Found DM status for ${validStatuses.length} users`);
+      return validStatuses;
+    } catch (error) {
+      console.error('❌ Error getting users with DMs enabled:', error);
+      return [];
+    }
+  };
+
   // Socket.IO connection handler
   io.on('connection', async (socket) => {
     console.log(`🟢 User connected: ${socket.username} (ID: ${socket.userId}), socket ID: ${socket.id}`);
@@ -323,6 +367,106 @@ const setupSocketIO = (server) => {
       }
     });
     
+    // Handle direct messages between users
+    socket.on('send_message', async (data) => {
+      console.log(`💬 Message from ${socket.userId} to ${data.recipientId}: ${data.message?.substring(0, 20)}${data.message?.length > 20 ? '...' : ''}`);
+      
+      const { recipientId, message, messageId } = data;
+      
+      if (!recipientId || !message) {
+        console.warn(`⚠️ Invalid message data from ${socket.userId}`);
+        socket.emit('message_status', { 
+          messageId,
+          status: 'error'
+        });
+        return;
+      }
+      
+      try {
+        // Check if recipient exists
+        const targetId = parseInt(recipientId, 10);
+        if (isNaN(targetId)) {
+          console.warn(`⚠️ Invalid recipient ID from ${socket.userId}: ${recipientId}`);
+          socket.emit('message_status', { 
+            messageId,
+            status: 'error'
+          });
+          return;
+        }
+        
+        // Get the recipient socket
+        const recipientSocket = activeConnections.get(targetId);
+        
+        // Check if recipient is connected
+        if (recipientSocket) {
+          // Format the message
+          const messagePayload = {
+            messageId: messageId || `msg_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            senderId: socket.userId,
+            recipientId: targetId,
+            message,
+            timestamp: Date.now(),
+            status: 'delivered'
+          };
+          
+          // Track this chat session
+          chatService.trackChatSession(socket.userId, targetId);
+          
+          // Send the message to recipient
+          console.log(`📤 Sending message from ${socket.username} (${socket.userId}) to user ${targetId}`);
+          recipientSocket.emit('new_message', messagePayload);
+          
+          // Send delivery confirmation to sender
+          socket.emit('message_status', { 
+            messageId: messagePayload.messageId,
+            status: 'delivered'
+          });
+          
+          console.log(`✅ Message from ${socket.userId} to ${targetId} delivered successfully`);
+        } else {
+          // Recipient is offline
+          console.log(`⚠️ Recipient ${targetId} is not connected`);
+          socket.emit('message_status', { 
+            messageId,
+            status: 'sent'  // Not delivered yet
+          });
+        }
+      } catch (error) {
+        console.error(`❌ Error sending message from ${socket.userId} to ${recipientId}:`, error);
+        socket.emit('message_status', { 
+          messageId,
+          status: 'error'
+        });
+      }
+    });
+    
+    // Handle message "seen" notifications
+    socket.on('message_seen', (data) => {
+      console.log(`👁️ Message ${data.messageId} marked as seen by ${socket.userId}`);
+      
+      const { messageId, senderId } = data;
+      
+      if (!messageId || !senderId) {
+        console.warn(`⚠️ Invalid message_seen data from ${socket.userId}`);
+        return;
+      }
+      
+      try {
+        const senderSocket = activeConnections.get(parseInt(senderId, 10));
+        if (senderSocket) {
+          senderSocket.emit('message_seen', {
+            messageId,
+            seenBy: socket.userId
+          });
+          console.log(`✅ Sent seen notification to ${senderId} for message ${messageId}`);
+        } else {
+          console.log(`⚠️ Sender ${senderId} is not connected, can't send seen notification`);
+        }
+      } catch (error) {
+        console.error(`❌ Error processing message_seen for message ${messageId}:`, error);
+      }
+    });
+    
     // Handle specific stop_location_sharing event
     socket.on('stop_location_sharing', async () => {
       console.log(`🛑 User ${socket.userId} requested to stop location sharing`);
@@ -347,9 +491,39 @@ const setupSocketIO = (server) => {
       }
     });
     
+    // Handle client requesting DM-enabled users
+    socket.on('get_dm_enabled_users', async (data) => {
+      console.log(`⏳ User ${socket.userId} requested DM-enabled users`);
+      
+      try {
+        // Get list of user IDs to check (from data or use all active users)
+        const userIdsToCheck = data && data.userIds ? data.userIds : 
+          Array.from(activeConnections.keys()).filter(id => id !== socket.userId);
+        
+        console.log(`⏳ Checking DM status for ${userIdsToCheck.length} users`);
+        const dmEnabledUsers = await getUsersWithDmsEnabled(userIdsToCheck);
+        
+        // Send the list back to the client
+        socket.emit('dm_enabled_users', {
+          users: dmEnabledUsers
+        });
+        
+        console.log(`✅ Sent DM status for ${dmEnabledUsers.length} users to user ${socket.userId}`);
+      } catch (error) {
+        console.error(`❌ Error processing get_dm_enabled_users for user ${socket.userId}:`, error);
+        socket.emit('dm_enabled_users', { 
+          error: 'Error retrieving DM status',
+          users: [] 
+        });
+      }
+    });
+    
     // Handle disconnection
     socket.on('disconnect', async (reason) => {
       console.log(`🔴 User disconnected: ${socket.username} (ID: ${socket.userId}), socket ID: ${socket.id}, reason: ${reason}`);
+      
+      // Clean up chat sessions for this user
+      chatService.cleanupUserSessions(socket.userId);
       
       // Remove from active connections
       activeConnections.delete(socket.userId);
@@ -404,10 +578,17 @@ module.exports = {
             const position = await redisService.getUserPosition(userId);
             const details = await redisService.getUserDetails(userId);
             
+            // Get additional user details from the database
+            const { getUserById } = require('../userService');
+            const userDetails = await getUserById(userId);
+            
             if (details && position) {
               return {
+                userId: userId,
                 id: userId,
-                name: details.name || 'Unknown',
+                name: details.name || userDetails?.nickname || 'Unknown',
+                nickname: details.name || userDetails?.nickname || 'Unknown',
+                enableDms: userDetails?.enableDms || false,
                 location: position,
                 lastUpdate: details.lastUpdate || Date.now()
               };
