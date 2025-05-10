@@ -220,7 +220,6 @@ const setupSocketIO = (server) => {
               return {
                 id: userId,
                 name: details.name || 'Unknown',
-                phoneNumber: details.phoneNumber,
                 location: position,
                 lastUpdate: details.lastUpdate || Date.now()
               };
@@ -228,7 +227,7 @@ const setupSocketIO = (server) => {
             console.log(`⚠️ User ${userId} missing position or details, excluding from broadcast`);
             return null;
           } catch (err) {
-            console.error(`❌ Error fetching data for user ${userId}:`, err);
+            console.error(`❌ Error fetching data for active user ${userId}:`, err);
             return null;
           }
         })
@@ -409,7 +408,6 @@ module.exports = {
               return {
                 id: userId,
                 name: details.name || 'Unknown',
-                phoneNumber: details.phoneNumber,
                 location: position,
                 lastUpdate: details.lastUpdate || Date.now()
               };

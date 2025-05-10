@@ -79,47 +79,6 @@ router.post('/', async (req, res) => {
 
 /**
  * @swagger
- * /peregrinapp/users/{phoneNumber}:
- *   get:
- *     summary: Get user by phone number
- *     description: Retrieves user details by phone number (requires authentication)
- *     tags: [Users]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: phoneNumber
- *         required: true
- *         schema:
- *           type: string
- *         description: The user's phone number
- *     responses:
- *       200:
- *         description: User details
- *       401:
- *         description: Unauthorized - authentication required
- *       404:
- *         description: User not found
- *       500:
- *         description: Server error
- */
-router.get('/:phoneNumber', authenticateJWT, async (req, res) => {
-  const { phoneNumber } = req.params;
-  try {
-    const user = await getUserByPhoneNumber(phoneNumber);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    res.json(user);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Database error' });
-  }
-});
-
-/**
- * @swagger
  * /peregrinapp/users/activate:
  *   post:
  *     summary: Activate user account
@@ -150,14 +109,14 @@ router.get('/:phoneNumber', authenticateJWT, async (req, res) => {
  *         description: Server error
  */
 router.post('/activate', async (req, res) => {
-  const { userId, activationCode } = req.body;
+  const { phoneNumber, activationCode } = req.body;
   
-  if (!userId || !activationCode) {
-    return res.status(400).json({ error: 'User ID and activation code are required' });
+  if (!phoneNumber || !activationCode) {
+    return res.status(400).json({ error: 'phoneNumber and activation code are required' });
   }
   
   try {
-    const result = await activateUser(userId, activationCode);
+    const result = await activateUser(phoneNumber, activationCode);
     
     if (result.success) {
       res.json({ message: result.message });
@@ -256,17 +215,21 @@ router.post('/resend-code', async (req, res) => {
  */
 router.put('/profile', authenticateJWT, async (req, res) => {
   const { enableDms, bio } = req.body;
-  const phoneNumber = req.user.phone;
+  const userId = req.user.userId; // Using userId from the JWT token
+  
+  console.log(`Updating profile for user ID: ${userId}`);
   
   // Make sure at least one property is provided
   if (enableDms === undefined && bio === undefined) {
+    console.log(`Profile update failed: No properties provided for user ID: ${userId}`);
     return res.status(400).json({ error: 'At least one property must be provided' });
   }
   
   try {
     // Get current user to access current values
-    const currentUser = await getUserByPhoneNumber(phoneNumber);
+    const currentUser = await getUserById(userId);
     if (!currentUser) {
+      console.log(`Profile update failed: User not found with ID: ${userId}`);
       return res.status(404).json({ error: 'User not found' });
     }
     
@@ -274,19 +237,21 @@ router.put('/profile', authenticateJWT, async (req, res) => {
     const updatedEnableDms = enableDms !== undefined ? enableDms : currentUser.enableDms;
     const updatedBio = bio !== undefined ? bio : currentUser.bio;
     
+    console.log(`Updating user preferences for ID: ${userId}`);
     // Update the user profile
     const updatedUser = await updateUserPreferences(
-      phoneNumber, 
+      userId, 
       updatedEnableDms,
       updatedBio
     );
     
+    console.log(`Profile updated successfully for user ID: ${userId}`);
     res.json({
       message: 'Profile updated successfully',
       user: updatedUser
     });
   } catch (err) {
-    console.error(err);
+    console.error(`Error updating profile for user ID: ${userId}`, err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -325,28 +290,75 @@ router.put('/profile', authenticateJWT, async (req, res) => {
 router.post('/login', async (req, res) => {
   const { phoneNumber, password } = req.body;
   
+  console.log(`Login attempt for phone number: ${phoneNumber}`);
+  
   if (!phoneNumber || !password) {
+    console.log(`Login failed: Missing required fields for phone number: ${phoneNumber}`);
     return res.status(400).json({ error: 'Phone number and password are required' });
   }
   
   try {
+    console.log(`Verifying password for phone number: ${phoneNumber}`);
     const passwordCheck = await verifyUserPassword(phoneNumber, password);
     if (!passwordCheck.valid) {
+      console.log(`Login failed: Invalid credentials for phone number: ${phoneNumber}`);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
+    console.log(`Password verified successfully for phone number: ${phoneNumber}, user ID: ${passwordCheck.userId}`);
     const user = await getUserById(passwordCheck.userId);
     
+    if (!user) {
+      console.log(`Login failed: User not found for ID: ${passwordCheck.userId}`);
+      return res.status(404).json({ error: 'User account not found' });
+    }
+    
+    if (!user.isActivated) {
+      console.log(`Login failed: Account not activated for phone number: ${phoneNumber}`);
+      return res.status(403).json({ error: 'Account not activated. Please activate your account first.' });
+    }
+    
     // Generate JWT token
+    console.log(`Generating JWT token for user ID: ${user.id}`);
     const token = generateToken(user);
     
+    // Get user's current position if available
+    let userPosition = null;
+    try {
+      // This would be replaced with your actual position retrieval logic
+      const activeUsers = getActiveUsers();
+      const activeUser = activeUsers.find(u => u.userId === user.id);
+      if (activeUser && activeUser.position) {
+        userPosition = activeUser.position;
+        console.log(`Retrieved position for user ID: ${user.id}`);
+      }
+    } catch (posErr) {
+      console.error(`Failed to retrieve position for user ID: ${user.id}`, posErr);
+      // Continue without position - non-critical error
+    }
+    
+    // Prepare complete user details
+    const userDetails = {
+      id: user.id,
+      phoneNumber: user.phoneNumber,
+      nickname: user.nickname,
+      dateOfBirth: user.dateOfBirth,
+      bio: user.bio,
+      isActivated: user.isActivated,
+      enableDms: user.enableDms,
+      createdAt: user.createdAt,
+      position: userPosition,
+      // Add any other relevant user details here
+    };
+    
+    console.log(`Login successful for phone number: ${phoneNumber}`);
     res.json({ 
       message: 'Login successful',
-      user,
+      user: userDetails,
       token
     });
   } catch (err) {
-    console.error(err);
+    console.error(`Login error for phone number: ${phoneNumber}`, err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -364,6 +376,66 @@ router.get('/profile', authenticateJWT, async (req, res) => {
     res.json(user);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * @swagger
+ * /peregrinapp/users/{id}:
+ *   get:
+ *     summary: Get user by ID
+ *     description: Retrieves limited user details by ID (requires authentication)
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The user's ID
+ *     responses:
+ *       200:
+ *         description: User details
+ *       401:
+ *         description: Unauthorized - authentication required
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Server error
+ */
+router.get('/:id', authenticateJWT, async (req, res) => {
+  const userId = parseInt(req.params.id, 10);
+  
+  console.log(`Request for user profile with ID: ${userId} by user: ${req.user.userId}`);
+  
+  if (isNaN(userId)) {
+    console.log(`Invalid user ID format: ${req.params.id}`);
+    return res.status(400).json({ error: 'Invalid user ID format' });
+  }
+  
+  try {
+    console.log(`Fetching user data for ID: ${userId}`);
+    const user = await getUserById(userId);
+    
+    if (!user) {
+      console.log(`User not found with ID: ${userId}`);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    console.log(`Successfully retrieved user data for ID: ${userId}`);
+    
+    // Return only specific fields
+    res.json({
+      id: user.id,
+      name: user.nickname,
+      bio: user.bio,
+      enableDms: user.enableDms
+    });
+  } catch (err) {
+    console.error(`Error retrieving user with ID: ${userId}`, err);
     res.status(500).json({ error: 'Server error' });
   }
 });
