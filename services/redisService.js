@@ -125,6 +125,7 @@ const initRedis = async (config = DEFAULT_REDIS_CONFIG) => {
       geoadd: mainClient.geoAdd.bind(mainClient),
       geopos: mainClient.geoPos.bind(mainClient),
       georadius: mainClient.geoRadius.bind(mainClient),
+      geodist: mainClient.geoDist.bind(mainClient),
       zrem: mainClient.zRem.bind(mainClient),
       hset: mainClient.hSet.bind(mainClient),
       hmset: mainClient.hSet.bind(mainClient), // Uses hSet in v4
@@ -387,6 +388,36 @@ const removeUserPosition = async (userId) => {
   });
 };
 
+// Calculate distance between two users using Redis GEODIST
+const calculateDistanceBetweenUsers = async (userId1, userId2, unit = 'm') => {
+  return executeRedisCommand('calculateDistanceBetweenUsers', async () => {
+    if (!client || !client.isReady) {
+      throw new Error('Redis not initialized');
+    }
+    
+    // Make sure both users exist in the geo index
+    const positions = await redisCommands.geopos(
+      KEYS.USER_POSITIONS, 
+      [`user:${userId1}`, `user:${userId2}`]
+    );
+    
+    // If either user doesn't have a position, we can't calculate distance
+    if (!positions || !positions[0] || !positions[1]) {
+      return null;
+    }
+    
+    // Use GEODIST to calculate distance
+    const distance = await redisCommands.geodist(
+      KEYS.USER_POSITIONS,
+      `user:${userId1}`,
+      `user:${userId2}`,
+      unit
+    );
+    
+    return parseFloat(distance);
+  });
+};
+
 // Check if Redis is connected
 const isRedisConnected = () => {
   return client && client.isReady;
@@ -401,6 +432,7 @@ module.exports = {
   findNearbyUsers,
   subscribeToUserUpdates,
   removeUserPosition,
+  calculateDistanceBetweenUsers,
   isRedisConnected,
   KEYS,
   POSITION_EXPIRY

@@ -60,6 +60,12 @@ async function canReceiveMessages(userId) {
 
 // Track active chat session
 function trackChatSession(userId1, userId2) {
+  // Prevent tracking sessions with self
+  if (userId1 === userId2) {
+    console.warn(`⚠️ Attempted to track chat session between user ${userId1} and themselves. Ignoring request.`);
+    return false;
+  }
+  
   // Get or create set for user1
   if (!activeChatSessions.has(userId1)) {
     activeChatSessions.set(userId1, new Set());
@@ -75,6 +81,7 @@ function trackChatSession(userId1, userId2) {
   activeChatSessions.get(userId2).add(userId1);
   
   console.log(`Chat session tracked between users ${userId1} and ${userId2}`);
+  return true;
 }
 
 // Get active chat sessions for a user
@@ -88,24 +95,16 @@ function getUserActiveSessions(userId) {
 
 // Check if users have an active chat session
 function hasActiveChatSession(userId1, userId2) {
+  // Prevent checking sessions with self
+  if (userId1 === userId2) {
+    return false;
+  }
+  
   if (!activeChatSessions.has(userId1)) {
     return false;
   }
   
   return activeChatSessions.get(userId1).has(userId2);
-}
-
-// End a chat session between users
-function endChatSession(userId1, userId2) {
-  if (activeChatSessions.has(userId1)) {
-    activeChatSessions.get(userId1).delete(userId2);
-  }
-  
-  if (activeChatSessions.has(userId2)) {
-    activeChatSessions.get(userId2).delete(userId1);
-  }
-  
-  console.log(`Chat session ended between users ${userId1} and ${userId2}`);
 }
 
 // Clean up chat sessions when a user disconnects
@@ -137,6 +136,5 @@ module.exports = {
   trackChatSession,
   getUserActiveSessions,
   hasActiveChatSession,
-  endChatSession,
   cleanupUserSessions
 }; 

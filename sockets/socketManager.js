@@ -67,7 +67,7 @@ const setupSocketIO = (server) => {
             console.log(`🔴 User removed from position tracking: ${data.userId}`);
           } else {
             // Handle user position update
-            console.log(`📍 Position update for user: ${data.userId}`);
+            //console.log(`📍 Position update for user: ${data.userId}`);
             
             // Broadcast to all clients
             broadcastUserUpdate(io, data.userId);
@@ -194,11 +194,11 @@ const setupSocketIO = (server) => {
     try {
       // Get all active user IDs from active connections
       const activeUserIds = Array.from(activeConnections.keys());
-      console.log(`📢 Broadcasting updates for ${activeUserIds.length} active connections`);
+      // console.log(`📢 Broadcasting updates for ${activeUserIds.length} active connections`);
       
       // Only proceed if there are active users
       if (activeUserIds.length === 0) {
-        console.log('ℹ️ No active users to broadcast');
+        // console.log('ℹ️ No active users to broadcast');
         return;
       }
       
@@ -207,14 +207,14 @@ const setupSocketIO = (server) => {
         activeUserIds.map(async (userId) => {
           try {
             // Get user position from Redis
-            console.log(`⏳ Fetching position for user: ${userId}`);
+            // console.log(`⏳ Fetching position for user: ${userId}`);
             const position = await redisService.getUserPosition(userId);
-            console.log(`${position ? '✅' : '❌'} Position for ${userId}: ${JSON.stringify(position)}`);
+            // console.log(`${position ? '✅' : '❌'} Position for ${userId}: ${JSON.stringify(position)}`);
             
             // Get user details from Redis
-            console.log(`⏳ Fetching details for user: ${userId}`);
+            // console.log(`⏳ Fetching details for user: ${userId}`);
             const details = await redisService.getUserDetails(userId);
-            console.log(`${details ? '✅' : '❌'} Details for ${userId}: ${JSON.stringify(details)}`);
+            // console.log(`${details ? '✅' : '❌'} Details for ${userId}: ${JSON.stringify(details)}`);
             
             // Only include users who have a position
             if (details && position) {
@@ -225,7 +225,7 @@ const setupSocketIO = (server) => {
                 lastUpdate: details.lastUpdate || Date.now()
               };
             }
-            console.log(`⚠️ User ${userId} missing position or details, excluding from broadcast`);
+            // console.log(`⚠️ User ${userId} missing position or details, excluding from broadcast`);
             return null;
           } catch (err) {
             console.error(`❌ Error fetching data for active user ${userId}:`, err);
@@ -236,7 +236,7 @@ const setupSocketIO = (server) => {
       
       // Filter out null entries and broadcast
       const filteredUsers = activeUsers.filter(user => user !== null);
-      console.log(`📢 Broadcasting ${filteredUsers.length} active users with positions`);
+      // console.log(`📢 Broadcasting ${filteredUsers.length} active users with positions`);
       io.emit('users_update', filteredUsers);
     } catch (error) {
       console.error('❌ Error broadcasting user updates:', error);
@@ -251,7 +251,7 @@ const setupSocketIO = (server) => {
     }
 
     try {
-      console.log(`📢 Broadcasting update for specific user: ${userId}`);
+      //console.log(`📢 Broadcasting update for specific user: ${userId}`);
       // Always broadcast full user list to keep client logic simple
       await broadcastUserUpdates(io);
     } catch (error) {
@@ -259,7 +259,7 @@ const setupSocketIO = (server) => {
     }
   };
 
-  // Function to get users with DMs enabled
+  /* Function to get users with DMs enabled
   const getUsersWithDmsEnabled = async (userIds) => {
     if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
       return [];
@@ -300,7 +300,7 @@ const setupSocketIO = (server) => {
       console.error('❌ Error getting users with DMs enabled:', error);
       return [];
     }
-  };
+  };*/
 
   // Socket.IO connection handler
   io.on('connection', async (socket) => {
@@ -309,6 +309,12 @@ const setupSocketIO = (server) => {
     // Store socket connection in memory map
     activeConnections.set(socket.userId, socket);
     console.log(`📊 Active connections: ${activeConnections.size}`);
+    
+    // Check and deliver any pending messages for this user
+    const deliveredCount = deliverPendingMessages(socket.userId);
+    if (deliveredCount > 0) {
+      console.log(`Delivered ${deliveredCount} pending messages to user ${socket.userId} on connect`);
+    }
     
     // Store user details in Redis
     if (redisInitialized) {
@@ -338,14 +344,14 @@ const setupSocketIO = (server) => {
     
     // Handle location updates
     socket.on('update_location', async (data) => {
-      console.log(`📍 Received location update from ${socket.userId}: ${JSON.stringify(data)}`);
+      // console.log(`📍 Received location update from ${socket.userId}: ${JSON.stringify(data)}`);
       if (!data || !data.latitude || !data.longitude) {
         console.warn(`⚠️ Invalid location data from ${socket.userId}: ${JSON.stringify(data)}`);
         return;
       }
       
       if (redisInitialized) {
-        console.log(`⏳ Storing position for ${socket.userId}: ${data.longitude}, ${data.latitude}`);
+        // console.log(`⏳ Storing position for ${socket.userId}: ${data.longitude}, ${data.latitude}`);
         try {
           // Store the position in Redis - this will trigger a pub/sub event
           await redisService.storeUserPosition(
@@ -358,7 +364,7 @@ const setupSocketIO = (server) => {
           await redisService.storeUserDetails(socket.userId, {
             lastUpdate: Date.now()
           });
-          console.log(`✅ Position stored for ${socket.userId}`);
+          // console.log(`✅ Position stored for ${socket.userId}`);
         } catch (error) {
           console.error(`❌ Failed to store position for ${socket.userId}:`, error);
         }
@@ -394,23 +400,38 @@ const setupSocketIO = (server) => {
           return;
         }
         
+        // Prevent messaging self
+        if (targetId === socket.userId) {
+          console.warn(`⚠️ User ${socket.userId} attempted to message themselves`);
+          socket.emit('message_status', { 
+            messageId,
+            status: 'error',
+            error: 'Cannot send messages to yourself'
+          });
+          return;
+        }
+        
         // Get the recipient socket
         const recipientSocket = activeConnections.get(targetId);
         
+        // Create message payload with unique ID if not provided
+        const finalMessageId = messageId || `msg_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        const messagePayload = {
+          messageId: finalMessageId,
+          senderId: socket.userId,
+          recipientId: targetId,
+          message,
+          timestamp: Date.now(),
+          status: 'pending'
+        };
+        
+        // Track this chat session
+        chatService.trackChatSession(socket.userId, targetId);
+        
         // Check if recipient is connected
         if (recipientSocket) {
-          // Format the message
-          const messagePayload = {
-            messageId: messageId || `msg_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-            senderId: socket.userId,
-            recipientId: targetId,
-            message,
-            timestamp: Date.now(),
-            status: 'delivered'
-          };
-          
-          // Track this chat session
-          chatService.trackChatSession(socket.userId, targetId);
+          // Set status to delivered
+          messagePayload.status = 'delivered';
           
           // Send the message to recipient
           console.log(`📤 Sending message from ${socket.username} (${socket.userId}) to user ${targetId}`);
@@ -418,18 +439,72 @@ const setupSocketIO = (server) => {
           
           // Send delivery confirmation to sender
           socket.emit('message_status', { 
-            messageId: messagePayload.messageId,
+            messageId: finalMessageId,
             status: 'delivered'
           });
           
           console.log(`✅ Message from ${socket.userId} to ${targetId} delivered successfully`);
         } else {
-          // Recipient is offline
-          console.log(`⚠️ Recipient ${targetId} is not connected`);
-          socket.emit('message_status', { 
-            messageId,
-            status: 'sent'  // Not delivered yet
+          // Recipient is offline, queue the message for retry
+          console.log(`⏳ Recipient ${targetId} is offline, queueing message for retry`);
+          
+          // Store in pending messages with 5-minute expiration
+          pendingMessages.set(finalMessageId, {
+            messageId: finalMessageId,
+            senderId: socket.userId,
+            recipientId: targetId,
+            message,
+            timestamp: messagePayload.timestamp,
+            expiresAt: Date.now() + (5 * 60 * 1000) // 5 minutes
           });
+          
+          // Tell sender message is pending
+          socket.emit('message_status', { 
+            messageId: finalMessageId,
+            status: 'pending',
+            message: 'Recipient is offline, will retry delivery for 5 minutes'
+          });
+          
+          // Schedule periodic retries
+          const attemptDelivery = () => {
+            // If message no longer in pending, it was either delivered or expired
+            if (!pendingMessages.has(finalMessageId)) return;
+            
+            // Get the most current socket reference
+            const currentRecipientSocket = activeConnections.get(targetId);
+            if (currentRecipientSocket) {
+              // Found the recipient, deliver the message
+              console.log(`📤 Retrying delivery of message ${finalMessageId} to ${targetId}`);
+              
+              const pendingMessage = pendingMessages.get(finalMessageId);
+              currentRecipientSocket.emit('new_message', {
+                messageId: pendingMessage.messageId,
+                senderId: pendingMessage.senderId,
+                recipientId: pendingMessage.recipientId,
+                message: pendingMessage.message,
+                timestamp: pendingMessage.timestamp,
+                status: 'delivered'
+              });
+              
+              // Notify sender if they're still connected
+              if (activeConnections.has(pendingMessage.senderId)) {
+                activeConnections.get(pendingMessage.senderId).emit('message_status', {
+                  messageId: pendingMessage.messageId,
+                  status: 'delivered'
+                });
+              }
+              
+              // Remove from pending
+              pendingMessages.delete(finalMessageId);
+              console.log(`✅ Message ${finalMessageId} delivered successfully on retry`);
+            }
+          };
+          
+          // Try delivery every 30 seconds for up to 5 minutes
+          const retryCount = 10; // 10 retries * 30 seconds = 5 minutes
+          for (let i = 1; i <= retryCount; i++) {
+            setTimeout(attemptDelivery, i * 30000); // 30 seconds between attempts
+          }
         }
       } catch (error) {
         console.error(`❌ Error sending message from ${socket.userId} to ${recipientId}:`, error);
@@ -473,9 +548,9 @@ const setupSocketIO = (server) => {
       if (redisInitialized) {
         try {
           // Remove user position from Redis
-          console.log(`⏳ Removing position for ${socket.userId} from Redis`);
+          // console.log(`⏳ Removing position for ${socket.userId} from Redis`);
           await redisService.removeUserPosition(socket.userId);
-          console.log(`✅ Position removed for ${socket.userId}`);
+          // console.log(`✅ Position removed for ${socket.userId}`);
           
           // Broadcast updates to reflect the change
           broadcastUserUpdates(io);
@@ -491,7 +566,7 @@ const setupSocketIO = (server) => {
       }
     });
     
-    // Handle client requesting DM-enabled users
+    /* Handle client requesting DM-enabled users
     socket.on('get_dm_enabled_users', async (data) => {
       console.log(`⏳ User ${socket.userId} requested DM-enabled users`);
       
@@ -516,7 +591,7 @@ const setupSocketIO = (server) => {
           users: [] 
         });
       }
-    });
+    });*/
     
     // Handle disconnection
     socket.on('disconnect', async (reason) => {
@@ -532,7 +607,7 @@ const setupSocketIO = (server) => {
       if (redisInitialized) {
         try {
           // Remove user position from Redis
-          console.log(`⏳ Removing position for ${socket.userId} due to disconnect`);
+          // console.log(`⏳ Removing position for ${socket.userId} due to disconnect`);
           await redisService.removeUserPosition(socket.userId);
           
           // Update user details to record disconnection time only
@@ -569,7 +644,7 @@ module.exports = {
     try {
       // Get all user IDs from active connections
       const activeUserIds = Array.from(activeConnections.keys());
-      console.log(`📊 Fetching active user data for ${activeUserIds.length} connections`);
+      // console.log(`📊 Fetching active user data for ${activeUserIds.length} connections`);
       
       // Collect user data for all active users
       const activeUsers = await Promise.all(
@@ -603,7 +678,7 @@ module.exports = {
       
       // Filter out null entries
       const filteredUsers = activeUsers.filter(user => user !== null);
-      console.log(`📊 Returning ${filteredUsers.length} active users with positions`);
+      // console.log(`📊 Returning ${filteredUsers.length} active users with positions`);
       return filteredUsers;
     } catch (error) {
       console.error('❌ Error getting active users:', error);
@@ -611,3 +686,65 @@ module.exports = {
     }
   }
 };
+
+// Track pending messages for offline users (messageId -> message data)
+const pendingMessages = new Map();
+
+// Clear expired pending messages
+setInterval(() => {
+  const now = Date.now();
+  for (const [messageId, data] of pendingMessages.entries()) {
+    if (now > data.expiresAt) {
+      console.log(`Message ${messageId} expired after retry period`);
+      // Notify sender that message delivery failed
+      if (activeConnections.has(data.senderId)) {
+        activeConnections.get(data.senderId).emit('message_status', {
+          messageId: data.messageId,
+          status: 'failed',
+          error: 'Recipient remained offline'
+        });
+      }
+      pendingMessages.delete(messageId);
+    }
+  }
+}, 30000); // Check every 30 seconds
+
+// Try to deliver pending messages when users connect
+function deliverPendingMessages(userId) {
+  let delivered = 0;
+  
+  for (const [messageId, data] of pendingMessages.entries()) {
+    if (data.recipientId === userId) {
+      const recipientSocket = activeConnections.get(userId);
+      if (recipientSocket) {
+        // Found the recipient, deliver the message
+        recipientSocket.emit('new_message', {
+          messageId: data.messageId,
+          senderId: data.senderId,
+          recipientId: data.recipientId,
+          message: data.message,
+          timestamp: data.timestamp,
+          status: 'delivered'
+        });
+        
+        // Notify sender if they're still connected
+        if (activeConnections.has(data.senderId)) {
+          activeConnections.get(data.senderId).emit('message_status', {
+            messageId: data.messageId,
+            status: 'delivered'
+          });
+        }
+        
+        // Remove from pending
+        pendingMessages.delete(messageId);
+        delivered++;
+      }
+    }
+  }
+  
+  if (delivered > 0) {
+    console.log(`Delivered ${delivered} pending messages to user ${userId}`);
+  }
+  
+  return delivered;
+}

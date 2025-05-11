@@ -7,7 +7,6 @@ const SALT_ROUNDS = 10;
 async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, password, enableDms = false) {
   console.log(`Adding new user with phone number: ${phoneNumber}, nickname: ${nickname}`);
   try {
-    // Hash the password
     const passwordHash = password ? await bcrypt.hash(password, SALT_ROUNDS) : null;
     console.log('Password hashed successfully');
     
@@ -24,7 +23,6 @@ async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, pas
     
     console.log(`User created successfully with ID: ${result.rows[0].id}`);
     
-    // Generate activation code if user is not already activated
     if (!isActivated) {
       await generateActivationCode(result.rows[0].id);
       console.log(`Activation code generated for user ID: ${result.rows[0].id}`);
@@ -32,7 +30,6 @@ async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, pas
     
     const user = result.rows[0];
     
-    // Transform snake_case to camelCase 
     const formattedUser = {
       id: user.id,
       phoneNumber: user.phone_number,
@@ -71,7 +68,6 @@ async function getUserById(userId) {
     const user = result.rows[0];
     console.log(`Found user with ID: ${userId}, phone: ${user.phone_number}`);
     
-    // Transform snake_case to camelCase and remove password_hash
     return {
       id: user.id,
       phoneNumber: user.phone_number,
@@ -104,7 +100,6 @@ async function getUserByPhoneNumber(phoneNumber) {
   
   const user = result.rows[0];
   
-  // Transform snake_case to camelCase and remove password_hash
   return {
     id: user.id,
     phoneNumber: user.phone_number,
@@ -114,7 +109,7 @@ async function getUserByPhoneNumber(phoneNumber) {
     isActivated: user.is_activated,
     enableDms: user.enable_dms,
     createdAt: user.created_at,
-    password_hash: user.password_hash // Keep this for internal use but it gets removed by most endpoints
+    password_hash: user.password_hash
   };
 }
 
@@ -133,12 +128,9 @@ async function verifyUserPassword(phoneNumber, password) {
   return { valid: isValid, userId: user.id };
 }
 
-// Function to generate activation code
 async function generateActivationCode(userId) {
-  // Generate a random 6-digit code
   const code = Math.floor(100000 + Math.random() * 900000).toString();
   
-  // Get the user's phone number
   const userResult = await pool.query(
     `SELECT phone_number FROM peregrinapp.users WHERE id = $1`,
     [userId]
@@ -152,7 +144,6 @@ async function generateActivationCode(userId) {
   
   console.log(`Generating activation code for user ID: ${userId}, phone: ${phoneNumber}`);
   
-  // Store the code in the database
   await pool.query(
     `INSERT INTO peregrinapp.activation_codes 
      (phone_number, user_id, activation_code, created_at, expires_at)
@@ -166,7 +157,6 @@ async function generateActivationCode(userId) {
   return code;
 }
 
-// Activate user account with code
 async function activateUser(phoneNumber, code) {
   console.log(`Attempting to activate user with phone ${phoneNumber} with code ${code}`);
   
@@ -192,7 +182,6 @@ async function activateUser(phoneNumber, code) {
   
   const userId = codeResult.rows[0].user_id;
   
-  // Update user status to activated
   await pool.query(
     `UPDATE peregrinapp.users
      SET is_activated = TRUE
@@ -204,7 +193,6 @@ async function activateUser(phoneNumber, code) {
   return { success: true, message: 'Account activated successfully' };
 }
 
-// Generate a new activation code and "send" it again
 async function resendActivationCode(phoneNumber) {
   console.log(`Attempting to resend activation code for phone number ${phoneNumber}`);
   
@@ -226,7 +214,6 @@ async function resendActivationCode(phoneNumber) {
   return { success: true, message: 'Activation code sent' };
 }
 
-// Update user preferences and profile information
 async function updateUserPreferences(userId, enableDms, bio) {
   const result = await pool.query(
     `UPDATE peregrinapp.users
@@ -243,7 +230,6 @@ async function updateUserPreferences(userId, enableDms, bio) {
   
   const user = result.rows[0];
   
-  // Transform snake_case to camelCase like in getUserById
   return {
     id: user.id,
     phoneNumber: user.phone_number,

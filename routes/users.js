@@ -14,6 +14,7 @@ const { getActiveUsers } = require('../sockets/socketManager');
 const { Pool } = require('pg');
 const pool = new Pool();
 const chatService = require('../services/chatService');
+const redisService = require('../services/redisService');
 
 /**
  * @swagger
@@ -665,6 +666,103 @@ router.post('/init-chat', authenticateJWT, async (req, res) => {
   } catch (err) {
     console.error(`Error initializing chat for user ${currentUserId} with target ${targetUserId}:`, err);
     res.status(500).json({ error: 'Error initializing chat' });
+  }
+});
+
+/**
+ * @swagger
+ * /peregrinapp/users/{targetUserId}/distance:
+ *   get:
+ *     summary: Calculate distance between current user and target user
+ *     description: Gets the distance between the current authenticated user and a target user based on their last known positions
+ *     tags: [Users, Location]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: targetUserId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The target user's ID
+ *     responses:
+ *       200:
+ *         description: Distance information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 distance:
+ *                   type: number
+ *                   description: Distance in meters
+ *                 units:
+ *                   type: string
+ *                   description: Units of measurement (meters or kilometers)
+ *                 formatted:
+ *                   type: string
+ *                   description: Formatted distance (e.g., "5.2 km")
+ *       400:
+ *         description: Invalid user ID or location not available
+ *       401:
+ *         description: Unauthorized - authentication required
+ *       404:
+ *         description: User not found or location not available
+ *       500:
+ *         description: Server error
+ */
+router.get('/:targetUserId/distance', authenticateJWT, async (req, res) => {
+  const currentUserId = req.user.userId;
+  const targetUserId = parseInt(req.params.targetUserId, 10);
+  
+  console.log(`Calculating distance between user ${currentUserId} and target ${targetUserId}`);
+  
+  if (isNaN(targetUserId)) {
+    return res.status(400).json({ error: 'Invalid target user ID format' });
+  }
+  
+  // Prevent checking distance to self
+  if (targetUserId === currentUserId) {
+    return res.status(400).json({ error: 'Cannot calculate distance to yourself' });
+  }
+  
+  try {
+    // Calculate distance using Redis GEODIST command
+    const distance = await redisService.calculateDistanceBetweenUsers(currentUserId, targetUserId);
+    
+    if (distance === null) {
+      return res.status(404).json({ 
+        error: 'Cannot calculate distance', 
+        details: 'One or both users do not have location data available' 
+      });
+    }
+    
+    console.log(`Distance between users ${currentUserId} and ${targetUserId}: ${distance} meters`);
+    
+    // Format the distance for display
+    let formatted;
+    let units;
+    
+    if (distance < 1000) {
+      // Less than 1km, show in meters
+      formatted = `${Math.round(distance)} m`;
+      units = 'meters';
+    } else {
+      // More than 1km, show in kilometers with 1 decimal place
+      const kilometers = distance / 1000;
+      formatted = `${kilometers.toFixed(1)} km`;
+      units = 'kilometers';
+    }
+    
+    res.json({
+      distance: distance,
+      units: units,
+      formatted: formatted
+    });
+    
+  } catch (err) {
+    console.error(`Error calculating distance between users ${currentUserId} and ${targetUserId}:`, err);
+    res.status(500).json({ error: 'Error calculating distance' });
   }
 });
 
