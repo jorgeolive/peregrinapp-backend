@@ -4,45 +4,91 @@ const pool = new Pool();
 
 const SALT_ROUNDS = 10;
 
-async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, password, sharePosition = false, enableDms = false) {
-  // Hash the password
-  const passwordHash = password ? await bcrypt.hash(password, SALT_ROUNDS) : null;
-  
-  const result = await pool.query(
-    `INSERT INTO peregrinapp.users (
-      phone_number, nickname, date_of_birth, bio, is_activated, 
-      password_hash, share_position, enable_dms, created_at
-    )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
-     RETURNING phone_number, nickname, date_of_birth, bio, is_activated, 
-               share_position, enable_dms, created_at`,
-    [phoneNumber, nickname, dateOfBirth, bio, isActivated, passwordHash, sharePosition, enableDms]
-  );
-  
-  // Generate activation code if user is not already activated
-  if (!isActivated) {
-    await generateActivationCode(phoneNumber);
+async function addUser(phoneNumber, nickname, dateOfBirth, bio, isActivated, password, enableDms = false) {
+  console.log(`Adding new user with phone number: ${phoneNumber}, nickname: ${nickname}`);
+  try {
+    const passwordHash = password ? await bcrypt.hash(password, SALT_ROUNDS) : null;
+    console.log('Password hashed successfully');
+    
+    const result = await pool.query(
+      `INSERT INTO peregrinapp.users (
+        phone_number, nickname, date_of_birth, bio, is_activated, 
+        password_hash, enable_dms, created_at
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       RETURNING id, phone_number, nickname, date_of_birth, bio, is_activated, 
+                 enable_dms, created_at`,
+      [phoneNumber, nickname, dateOfBirth, bio, isActivated, passwordHash, enableDms]
+    );
+    
+    console.log(`User created successfully with ID: ${result.rows[0].id}`);
+    
+    if (!isActivated) {
+      await generateActivationCode(result.rows[0].id);
+      console.log(`Activation code generated for user ID: ${result.rows[0].id}`);
+    }
+    
+    const user = result.rows[0];
+    
+    const formattedUser = {
+      id: user.id,
+      phoneNumber: user.phone_number,
+      nickname: user.nickname,
+      dateOfBirth: user.date_of_birth,
+      bio: user.bio,
+      isActivated: user.is_activated,
+      enableDms: user.enable_dms,
+      createdAt: user.created_at
+    };
+    
+    console.log('User addition completed successfully');
+    return formattedUser;
+  } catch (error) {
+    console.error('Error adding user:', error.message);
+    throw error;
   }
-  
-  const user = result.rows[0];
-  
-  // Transform snake_case to camelCase 
-  return {
-    phoneNumber: user.phone_number,
-    nickname: user.nickname,
-    dateOfBirth: user.date_of_birth,
-    bio: user.bio,
-    isActivated: user.is_activated,
-    sharePosition: user.share_position,
-    enableDms: user.enable_dms,
-    createdAt: user.created_at
-  };
+}
+
+async function getUserById(userId) {
+  console.log(`Getting user data for ID: ${userId}`);
+  try {
+    const result = await pool.query(
+      `SELECT id, phone_number, nickname, date_of_birth, bio, is_activated, 
+              password_hash, enable_dms, created_at
+       FROM peregrinapp.users
+       WHERE id = $1`,
+      [userId]
+    );
+    
+    if (result.rows.length === 0) {
+      console.log(`No user found with ID: ${userId}`);
+      return null;
+    }
+    
+    const user = result.rows[0];
+    console.log(`Found user with ID: ${userId}, phone: ${user.phone_number}`);
+    
+    return {
+      id: user.id,
+      phoneNumber: user.phone_number,
+      nickname: user.nickname,
+      dateOfBirth: user.date_of_birth,
+      bio: user.bio,
+      isActivated: user.is_activated,
+      enableDms: user.enable_dms,
+      createdAt: user.created_at,
+      password_hash: user.password_hash // Keep this for internal use but it gets removed by most endpoints
+    };
+  } catch (error) {
+    console.error(`Error retrieving user with ID: ${userId}`, error);
+    throw error;
+  }
 }
 
 async function getUserByPhoneNumber(phoneNumber) {
   const result = await pool.query(
-    `SELECT phone_number, nickname, date_of_birth, bio, is_activated, 
-            password_hash, share_position, enable_dms, created_at
+    `SELECT id, phone_number, nickname, date_of_birth, bio, is_activated, 
+            password_hash, enable_dms, created_at
      FROM peregrinapp.users
      WHERE phone_number = $1`,
     [phoneNumber]
@@ -54,134 +100,128 @@ async function getUserByPhoneNumber(phoneNumber) {
   
   const user = result.rows[0];
   
-  // Transform snake_case to camelCase and remove password_hash
   return {
+    id: user.id,
     phoneNumber: user.phone_number,
     nickname: user.nickname,
     dateOfBirth: user.date_of_birth,
     bio: user.bio,
     isActivated: user.is_activated,
-    sharePosition: user.share_position,
     enableDms: user.enable_dms,
     createdAt: user.created_at,
-    password_hash: user.password_hash // Keep this for internal use but it gets removed by most endpoints
+    password_hash: user.password_hash
   };
 }
 
 async function verifyUserPassword(phoneNumber, password) {
   const result = await pool.query(
-    `SELECT password_hash
+    `SELECT id, password_hash
      FROM peregrinapp.users
      WHERE phone_number = $1`,
     [phoneNumber]
   );
   
   const user = result.rows[0];
-  if (!user || !user.password_hash) return false;
+  if (!user || !user.password_hash) return { valid: false };
   
-  return bcrypt.compare(password, user.password_hash);
+  const isValid = await bcrypt.compare(password, user.password_hash);
+  return { valid: isValid, userId: user.id };
 }
 
-// Generate a random 6-digit activation code
-function generateRandomCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-// Store activation code for a user
-async function generateActivationCode(phoneNumber) {
-  const activationCode = generateRandomCode();
-  const expiresAt = new Date();
-  expiresAt.setHours(expiresAt.getHours() + 1); // Code expires in 1 hour
+async function generateActivationCode(userId) {
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
   
-  // Delete any existing activation codes for the user
-  await pool.query(
-    `DELETE FROM peregrinapp.activation_codes 
-     WHERE phone_number = $1`,
-    [phoneNumber]
+  const userResult = await pool.query(
+    `SELECT phone_number FROM peregrinapp.users WHERE id = $1`,
+    [userId]
   );
   
-  // Insert new activation code
-  await pool.query(
-    `INSERT INTO peregrinapp.activation_codes (phone_number, activation_code, expires_at)
-     VALUES ($1, $2, $3)`,
-    [phoneNumber, activationCode, expiresAt]
-  );
-  
-  // Here would be the place to call an SMS service to send the code
-  console.log(`Activation code for ${phoneNumber}: ${activationCode}`);
-  
-  return activationCode;
-}
-
-// Verify and activate a user with their activation code
-async function activateUser(phoneNumber, activationCode) {
-  // Get the stored activation code
-  const result = await pool.query(
-    `SELECT activation_code, expires_at 
-     FROM peregrinapp.activation_codes 
-     WHERE phone_number = $1`,
-    [phoneNumber]
-  );
-  
-  const storedCode = result.rows[0];
-  
-  // Check if code exists, matches, and hasn't expired
-  if (!storedCode) {
-    return { success: false, message: 'No activation code found' };
+  if (userResult.rows.length === 0) {
+    throw new Error(`User with ID ${userId} not found`);
   }
   
-  if (storedCode.activation_code !== activationCode) {
+  const phoneNumber = userResult.rows[0].phone_number;
+  
+  console.log(`Generating activation code for user ID: ${userId}, phone: ${phoneNumber}`);
+  
+  await pool.query(
+    `INSERT INTO peregrinapp.activation_codes 
+     (phone_number, user_id, activation_code, created_at, expires_at)
+     VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '1 hour')`,
+    [phoneNumber, userId, code]
+  );
+  
+  // In a real application, you would send this code via SMS
+  console.log(`Activation code for user ${userId}: ${code}`);
+  
+  return code;
+}
+
+async function activateUser(phoneNumber, code) {
+  console.log(`Attempting to activate user with phone ${phoneNumber} with code ${code}`);
+  
+  // Verify the activation code
+  const codeResult = await pool.query(
+    `SELECT activation_code, user_id
+     FROM peregrinapp.activation_codes
+     WHERE phone_number = $1 AND expires_at > NOW()
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [phoneNumber]
+  );
+  
+  if (codeResult.rows.length === 0) {
+    console.log(`No valid activation code found for phone number ${phoneNumber}`);
+    return { success: false, message: 'Invalid or expired activation code' };
+  }
+  
+  if (codeResult.rows[0].activation_code !== code) {
+    console.log(`Activation code mismatch for phone number ${phoneNumber}`);
     return { success: false, message: 'Invalid activation code' };
   }
   
-  if (new Date() > storedCode.expires_at) {
-    return { success: false, message: 'Activation code has expired' };
-  }
+  const userId = codeResult.rows[0].user_id;
   
-  // Activate the user
   await pool.query(
-    `UPDATE peregrinapp.users 
-     SET is_activated = true 
+    `UPDATE peregrinapp.users
+     SET is_activated = TRUE
      WHERE phone_number = $1`,
     [phoneNumber]
   );
   
-  // Delete the used activation code
-  await pool.query(
-    `DELETE FROM peregrinapp.activation_codes 
-     WHERE phone_number = $1`,
-    [phoneNumber]
-  );
-  
-  return { success: true, message: 'User activated successfully' };
+  console.log(`User with phone ${phoneNumber} activated successfully`);
+  return { success: true, message: 'Account activated successfully' };
 }
 
-// Generate a new activation code and "send" it again
 async function resendActivationCode(phoneNumber) {
+  console.log(`Attempting to resend activation code for phone number ${phoneNumber}`);
+  
   const user = await getUserByPhoneNumber(phoneNumber);
   
   if (!user) {
+    console.log(`User with phone number ${phoneNumber} not found`);
     return { success: false, message: 'User not found' };
   }
   
-  if (user.is_activated) {
+  if (user.isActivated) {
+    console.log(`User with phone number ${phoneNumber} is already activated`);
     return { success: false, message: 'User is already activated' };
   }
   
-  await generateActivationCode(phoneNumber);
+  const code = await generateActivationCode(user.id);
+  console.log(`New activation code generated for phone number ${phoneNumber}`);
   
   return { success: true, message: 'Activation code sent' };
 }
 
-// Update user preferences and profile information
-async function updateUserPreferences(phoneNumber, sharePosition, enableDms, bio) {
+async function updateUserPreferences(userId, enableDms, bio) {
   const result = await pool.query(
     `UPDATE peregrinapp.users
-     SET share_position = $2, enable_dms = $3, bio = $4
-     WHERE phone_number = $1
-     RETURNING phone_number, nickname, date_of_birth, bio, is_activated, 
-               share_position, enable_dms, created_at`,
-    [phoneNumber, sharePosition, enableDms, bio]
+     SET enable_dms = $2, bio = $3
+     WHERE id = $1
+     RETURNING id, phone_number, nickname, date_of_birth, bio, is_activated, 
+               enable_dms, created_at`,
+    [userId, enableDms, bio]
   );
   
   if (result.rows.length === 0) {
@@ -190,14 +230,13 @@ async function updateUserPreferences(phoneNumber, sharePosition, enableDms, bio)
   
   const user = result.rows[0];
   
-  // Transform snake_case to camelCase like in getUserByPhoneNumber
   return {
+    id: user.id,
     phoneNumber: user.phone_number,
     nickname: user.nickname,
     dateOfBirth: user.date_of_birth,
     bio: user.bio,
     isActivated: user.is_activated,
-    sharePosition: user.share_position,
     enableDms: user.enable_dms,
     createdAt: user.created_at
   };
@@ -205,6 +244,7 @@ async function updateUserPreferences(phoneNumber, sharePosition, enableDms, bio)
 
 module.exports = { 
   addUser, 
+  getUserById,
   getUserByPhoneNumber, 
   verifyUserPassword,
   activateUser,

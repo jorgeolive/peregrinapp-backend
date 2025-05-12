@@ -5,24 +5,61 @@ const TOKEN_EXPIRY = '100d';
 
 function generateToken(user) {
   const payload = {
-    phone: user.phoneNumber,
-    nickname: user.nickname,
-    isActivated: user.isActivated,
-    sharePosition: user.sharePosition,
-    enableDms: user.enableDms
+    userId: user.id
   };
 
   return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
 }
 
-// Verify and decode a JWT token
-function verifyToken(token) {
-  try {
-    return jwt.verify(token, JWT_SECRET);
-  } catch (error) {
-    return null;
+/**
+ * Verify JWT token validity
+ * 
+ * @param {string} token - The JWT token to verify
+ * @returns {Object} Object containing validity status and decoded token or error
+ */
+const verifyToken = (token) => {
+  if (!token) {
+    return { 
+      valid: false, 
+      error: 'Token is required'
+    };
   }
-}
+
+  try {
+    // Remove 'Bearer ' prefix if present
+    const cleanToken = token.startsWith('Bearer ') ? token.slice(7) : token;
+    
+    // Verify JWT token
+    const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET || 'your_jwt_secret');
+    
+    // Check if token payload has minimum required fields
+    if (!decoded || !decoded.userId) {
+      return {
+        valid: false,
+        error: 'Invalid token payload'
+      };
+    }
+    
+    return {
+      valid: true,
+      decoded
+    };
+  } catch (error) {
+    let errorMessage = 'Invalid token';
+    
+    if (error.name === 'TokenExpiredError') {
+      errorMessage = 'Token has expired';
+    } else if (error.name === 'JsonWebTokenError') {
+      errorMessage = 'Invalid token format';
+    }
+    
+    return {
+      valid: false,
+      error: errorMessage,
+      originalError: error
+    };
+  }
+};
 
 function authenticateJWT(req, res, next) {
   const authHeader = req.headers.authorization;
@@ -33,22 +70,33 @@ function authenticateJWT(req, res, next) {
   
   const token = authHeader.split(' ')[1];
   
-  const decodedToken = verifyToken(token);
-  if (!decodedToken) {
+  const tokenResult = verifyToken(token);
+  if (!tokenResult.valid) {
     return res.status(403).json({ error: 'Invalid or expired token' });
   }
   
-  req.user = decodedToken;
+  // Set minimal user data from token
+  req.user = tokenResult.decoded;
   
   next();
 }
 
 // Check if user is activated middleware
-function requireActivated(req, res, next) {
-  if (!req.user || !req.user.isActivated) {
-    return res.status(403).json({ error: 'Account not activated' });
+async function requireActivated(req, res, next) {
+  try {
+    // Get the user from the database since token only has userId
+    const { getUserById } = require('./userService');
+    const user = await getUserById(req.user.userId);
+    
+    if (!user || !user.isActivated) {
+      return res.status(403).json({ error: 'Account not activated' });
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Error checking user activation:', error);
+    return res.status(500).json({ error: 'Server error' });
   }
-  next();
 }
 
 module.exports = {
