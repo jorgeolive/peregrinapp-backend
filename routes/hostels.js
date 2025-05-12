@@ -17,7 +17,7 @@ const { authenticateJWT } = require('../authService');
  *         name: id
  *         required: true
  *         schema:
- *           type: string
+ *           type: string 
  *         description: The hostel ID
  *     responses:
  *       200:

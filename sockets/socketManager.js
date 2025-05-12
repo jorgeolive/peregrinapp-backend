@@ -343,10 +343,11 @@ const setupSocketIO = (server) => {
     broadcastUserUpdates(io);
     
     // Handle location updates
-    socket.on('update_location', async (data) => {
+    socket.on('update_location', async (data, ack) => {
       // console.log(`📍 Received location update from ${socket.userId}: ${JSON.stringify(data)}`);
       if (!data || !data.latitude || !data.longitude) {
         console.warn(`⚠️ Invalid location data from ${socket.userId}: ${JSON.stringify(data)}`);
+        if (typeof ack === 'function') ack({ status: 'error', message: 'Invalid location data' });
         return;
       }
       
@@ -365,16 +366,19 @@ const setupSocketIO = (server) => {
             lastUpdate: Date.now()
           });
           // console.log(`✅ Position stored for ${socket.userId}`);
+          if (typeof ack === 'function') ack({ status: 'success' });
         } catch (error) {
           console.error(`❌ Failed to store position for ${socket.userId}:`, error);
+          if (typeof ack === 'function') ack({ status: 'error', message: error.message });
         }
       } else {
         console.warn(`⚠️ Redis not initialized, can't store position for ${socket.userId}`);
+        if (typeof ack === 'function') ack({ status: 'error', message: 'Redis not initialized' });
       }
     });
     
     // Handle direct messages between users
-    socket.on('send_message', async (data) => {
+    socket.on('send_message', async (data, ack) => {
       console.log(`💬 Message from ${socket.userId} to ${data.recipientId}: ${data.message?.substring(0, 20)}${data.message?.length > 20 ? '...' : ''}`);
       
       const { recipientId, message, messageId } = data;
@@ -385,6 +389,7 @@ const setupSocketIO = (server) => {
           messageId,
           status: 'error'
         });
+        if (typeof ack === 'function') ack({ status: 'error', message: 'Invalid message data' });
         return;
       }
       
@@ -397,6 +402,7 @@ const setupSocketIO = (server) => {
             messageId,
             status: 'error'
           });
+          if (typeof ack === 'function') ack({ status: 'error', message: 'Invalid recipient ID' });
           return;
         }
         
@@ -408,6 +414,7 @@ const setupSocketIO = (server) => {
             status: 'error',
             error: 'Cannot send messages to yourself'
           });
+          if (typeof ack === 'function') ack({ status: 'error', message: 'Cannot send messages to yourself' });
           return;
         }
         
@@ -444,6 +451,7 @@ const setupSocketIO = (server) => {
           });
           
           console.log(`✅ Message from ${socket.userId} to ${targetId} delivered successfully`);
+          if (typeof ack === 'function') ack({ status: 'delivered', messageId: finalMessageId });
         } else {
           // Recipient is offline, queue the message for retry
           console.log(`⏳ Recipient ${targetId} is offline, queueing message for retry`);
@@ -462,6 +470,12 @@ const setupSocketIO = (server) => {
           socket.emit('message_status', { 
             messageId: finalMessageId,
             status: 'pending',
+            message: 'Recipient is offline, will retry delivery for 5 minutes'
+          });
+          
+          if (typeof ack === 'function') ack({ 
+            status: 'pending', 
+            messageId: finalMessageId,
             message: 'Recipient is offline, will retry delivery for 5 minutes'
           });
           
@@ -512,17 +526,19 @@ const setupSocketIO = (server) => {
           messageId,
           status: 'error'
         });
+        if (typeof ack === 'function') ack({ status: 'error', message: error.message });
       }
     });
     
     // Handle message "seen" notifications
-    socket.on('message_seen', (data) => {
+    socket.on('message_seen', (data, ack) => {
       console.log(`👁️ Message ${data.messageId} marked as seen by ${socket.userId}`);
       
       const { messageId, senderId } = data;
       
       if (!messageId || !senderId) {
         console.warn(`⚠️ Invalid message_seen data from ${socket.userId}`);
+        if (typeof ack === 'function') ack({ status: 'error', message: 'Invalid message seen data' });
         return;
       }
       
@@ -534,16 +550,19 @@ const setupSocketIO = (server) => {
             seenBy: socket.userId
           });
           console.log(`✅ Sent seen notification to ${senderId} for message ${messageId}`);
+          if (typeof ack === 'function') ack({ status: 'success' });
         } else {
           console.log(`⚠️ Sender ${senderId} is not connected, can't send seen notification`);
+          if (typeof ack === 'function') ack({ status: 'success', note: 'Sender offline, notification will be delivered when they reconnect' });
         }
       } catch (error) {
         console.error(`❌ Error processing message_seen for message ${messageId}:`, error);
+        if (typeof ack === 'function') ack({ status: 'error', message: error.message });
       }
     });
     
     // Handle specific stop_location_sharing event
-    socket.on('stop_location_sharing', async () => {
+    socket.on('stop_location_sharing', async (data, ack) => {
       console.log(`🛑 User ${socket.userId} requested to stop location sharing`);
       if (redisInitialized) {
         try {
@@ -555,14 +574,19 @@ const setupSocketIO = (server) => {
           // Broadcast updates to reflect the change
           broadcastUserUpdates(io);
           
+          // Send acknowledgment before disconnecting
+          if (typeof ack === 'function') ack({ status: 'success' });
+          
           // Close the socket connection
           console.log(`🔌 Disconnecting socket for ${socket.userId} as requested`);
           socket.disconnect(true);
         } catch (error) {
           console.error(`❌ Error processing stop_location_sharing for ${socket.userId}:`, error);
+          if (typeof ack === 'function') ack({ status: 'error', message: error.message });
         }
       } else {
         console.warn(`⚠️ Redis not initialized, can't remove position for ${socket.userId}`);
+        if (typeof ack === 'function') ack({ status: 'error', message: 'Redis not initialized' });
       }
     });
     
